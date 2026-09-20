@@ -89,4 +89,39 @@ def compute_risk_level(row) -> tuple[str, list[str]]:
     return level, flags
 
 
-def build_risk_report(attendance_features: pd.DataFrame, assessment_features: pd.DataFrame) ->
+def build_risk_report(attendance_features: pd.DataFrame, assessment_features: pd.DataFrame) -> pd.DataFrame:
+    df = pd.merge(attendance_features, assessment_features, on="student_id", how="outer").fillna(0)
+    
+    risk_levels = []
+    risk_reasons = []
+
+    for _, row in df.iterrows():
+        level, flags = compute_risk_level(row)
+        risk_levels.append(level)
+        risk_reasons.append(", ".join(flags) if flags else "لا توجد مؤشرات خطر")
+
+    df["risk_level"] = risk_levels
+    df["risk_reasons"] = risk_reasons
+
+    return df
+
+
+def main():
+    conn = get_connection()
+    try:
+        attendance = load_attendance(conn)
+        assessments = load_assessments(conn)
+
+        att_features = compute_attendance_features(attendance)
+        ass_features = compute_assessment_features(assessments)
+
+        report = build_risk_report(att_features, ass_features)
+        
+        print("\n--- تقرير مخاطر التدريب (Training Risk Report) ---")
+        print(report[["student_id", "risk_level", "risk_reasons"]].head(10))
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    main()

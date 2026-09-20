@@ -1,8 +1,11 @@
 """
-Synthetic seed data generator for WST — covers only the tables needed to
-exercise reorder_baseline.py and training_risk_baseline.py.
-Safe to re-run: it wipes its own rows first (see TRUNCATE section).
-NO REAL DATA — every value here is fake/random (per brief rule: synthetic data only).
+Synthetic seed data generator for WST — ADDITIVE version.
+Preserves existing organization_scopes/users/students/customers/vehicles
+(e.g. from wst_seed_data.sql) and only adds inventory + training data on top,
+linking training records to the students that already exist.
+Safe to re-run: only truncates the tables it owns (inventory + training),
+never touches users/students/customers/vehicles.
+NO REAL DATA — every value here is fake/random (synthetic data only).
 """
 
 import random
@@ -11,8 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from db import get_connection
 
-random.seed(42)  # نتائج قابلة للتكرار كل مرة تشغّل السكريبت
-
+random.seed(42)
 NOW = datetime.now(timezone.utc)
 
 
@@ -28,40 +30,64 @@ def main():
     conn = get_connection()
     cur = conn.cursor()
     try:
+        cur.execute("SELECT id FROM organization_scopes LIMIT 1")
+        row = cur.fetchone()
+        if row is None:
+            raise RuntimeError("no organization_scope found — run wst_seed_data.sql first")
+        org_id = row[0]
+
+        cur.execute("SELECT id FROM students ORDER BY student_number")
+        student_ids = [r[0] for r in cur.fetchall()]
+        if not student_ids:
+            raise RuntimeError("no students found — run wst_seed_data.sql first")
+
+        print(f"Found {len(student_ids)} existing students, reusing them.")
+
         cur.execute("""
             TRUNCATE TABLE
                 assessments, attendance_records, enrollments, training_sessions,
-                training_groups, students, course_tasks, courses, practical_tasks,
+                training_groups, course_tasks, courses, practical_tasks,
                 competencies, training_terms, bays,
-                stock_movements, stock_balances, parts, stores,
-                user_roles, users, organization_scopes
+                stock_movements, stock_balances, parts, stores
             CASCADE
         """)
 
-        # ---------- SECTION: org scope + staff users ----------
-        org_id = new_id()
-        cur.execute("""
-            INSERT INTO organization_scopes (id, code, name, type, status)
-            VALUES (%s, 'MAIN', 'Main Branch', 'BRANCH', 'ACTIVE')
-        """, (org_id,))
-
-        admin_id, mentor_id, supervisor_id = new_id(), new_id(), new_id()
-        staff = [
-            (admin_id, "admin@example.test", "System Admin"),
-            (mentor_id, "mentor@example.test", "Mentor One"),
-            (supervisor_id, "supervisor@example.test", "Training Supervisor"),
-        ]
-        for uid, email, name in staff:
+        cur.execute("SELECT id FROM users WHERE email = 'ai.seed.admin@wst-ai.local'")
+        row = cur.fetchone()
+        if row:
+            admin_id = row[0]
+        else:
+            admin_id = new_id()
             cur.execute("""
                 INSERT INTO users (id, email, display_name, password_hash, preferred_locale, status, must_change_password)
-                VALUES (%s, %s, %s, 'fake-hash-not-real', 'en', 'ACTIVE', FALSE)
-            """, (uid, email, name))
+                VALUES (%s, 'ai.seed.admin@wst-ai.local', 'Seed Admin', 'fake-hash-not-real', 'en', 'ACTIVE', FALSE)
+            """, (admin_id,))
+            cur.execute("INSERT INTO user_roles (user_id, role_code) VALUES (%s, 'SYSTEM_ADMIN')", (admin_id,))
 
-        cur.execute("INSERT INTO user_roles (user_id, role_code) VALUES (%s, 'SYSTEM_ADMIN')", (admin_id,))
-        cur.execute("INSERT INTO user_roles (user_id, role_code) VALUES (%s, 'MENTOR')", (mentor_id,))
-        cur.execute("INSERT INTO user_roles (user_id, role_code) VALUES (%s, 'TRAINING_SUPERVISOR')", (supervisor_id,))
+        cur.execute("SELECT id FROM users WHERE email = 'ai.seed.mentor@wst-ai.local'")
+        row = cur.fetchone()
+        if row:
+            mentor_id = row[0]
+        else:
+            mentor_id = new_id()
+            cur.execute("""
+                INSERT INTO users (id, email, display_name, password_hash, preferred_locale, status, must_change_password)
+                VALUES (%s, 'ai.seed.mentor@wst-ai.local', 'Seed Mentor', 'fake-hash-not-real', 'en', 'ACTIVE', FALSE)
+            """, (mentor_id,))
+            cur.execute("INSERT INTO user_roles (user_id, role_code) VALUES (%s, 'MENTOR')", (mentor_id,))
 
-        # ---------- SECTION: inventory (for reorder_baseline.py) ----------
+        cur.execute("SELECT id FROM users WHERE email = 'ai.seed.supervisor@wst-ai.local'")
+        row = cur.fetchone()
+        if row:
+            supervisor_id = row[0]
+        else:
+            supervisor_id = new_id()
+            cur.execute("""
+                INSERT INTO users (id, email, display_name, password_hash, preferred_locale, status, must_change_password)
+                VALUES (%s, 'ai.seed.supervisor@wst-ai.local', 'Seed Supervisor', 'fake-hash-not-real', 'en', 'ACTIVE', FALSE)
+            """, (supervisor_id,))
+            cur.execute("INSERT INTO user_roles (user_id, role_code) VALUES (%s, 'TRAINING_SUPERVISOR')", (supervisor_id,))
+
         store_id = new_id()
         cur.execute("""
             INSERT INTO stores (id, organization_scope_id, code, name, status)
@@ -112,7 +138,6 @@ def main():
                 VALUES (%s, %s, %s, 0, %s, %s, %s, 'EGP')
             """, (store_id, part_id, running_balance, min_level, max_level, round(random.uniform(40, 400), 2)))
 
-        # ---------- SECTION: training (for training_risk_baseline.py) ----------
         bay_id = new_id()
         cur.execute("""
             INSERT INTO bays (id, organization_scope_id, code, name, capacity, status)
@@ -169,30 +194,16 @@ def main():
                   start, start + timedelta(hours=2)))
             session_ids.append(session_id)
 
-        student_ids = []
-        for i in range(15):
-            user_id = new_id()
-            cur.execute("""
-                INSERT INTO users (id, email, display_name, password_hash, preferred_locale, status, must_change_password)
-                VALUES (%s, %s, %s, 'fake-hash-not-real', 'en', 'ACTIVE', FALSE)
-            """, (user_id, f"student{i+1}@example.test", f"Student {i+1}"))
-            cur.execute("INSERT INTO user_roles (user_id, role_code) VALUES (%s, 'STUDENT')", (user_id,))
-
-            student_id = new_id()
-            cur.execute("""
-                INSERT INTO students (id, user_id, student_number, status)
-                VALUES (%s, %s, %s, 'ACTIVE')
-            """, (student_id, user_id, f"STU{i+1:03d}"))
-            student_ids.append(student_id)
-
+        third = max(1, len(student_ids) // 3)
+        for i, student_id in enumerate(student_ids):
             cur.execute("""
                 INSERT INTO enrollments (id, group_id, course_id, student_id, status)
                 VALUES (%s, %s, %s, %s, 'ACTIVE')
             """, (new_id(), group_id, course_id, student_id))
 
-            if i < 5:
+            if i < third:
                 absence_chance, weak_chance, pending_chance = 0.05, 0.05, 0.1
-            elif i < 10:
+            elif i < 2 * third:
                 absence_chance, weak_chance, pending_chance = 0.25, 0.2, 0.3
             else:
                 absence_chance, weak_chance, pending_chance = 0.5, 0.5, 0.6
@@ -226,13 +237,13 @@ def main():
                       signed_off_by, signed_off_at, counts))
 
         conn.commit()
-        print("✅ تم توليد بيانات synthetic بنجاح:")
-        print(f"   - {len(part_specs)} قطعة غيار مع حركات مخزون لآخر 8 أسابيع")
-        print(f"   - {len(student_ids)} طالب مع حضور وتقييمات لـ {len(session_ids)} جلسات")
+        print("Done. Inventory and training data generated (existing students/customers untouched):")
+        print(f"   - {len(part_specs)} parts with 8 weeks of stock movements")
+        print(f"   - {len(student_ids)} existing students with attendance/assessments for {len(session_ids)} sessions")
 
     except Exception as e:
         conn.rollback()
-        print("❌ فشل توليد البيانات، تم التراجع عن كل التغييرات:")
+        print("FAILED — rolled back all changes:")
         print(e)
         raise
     finally:
