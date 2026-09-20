@@ -2,3 +2,18 @@ venv/
 .env
 __pycache__/
 *.pyc
+
+# Gemini prototype artifacts — kept locally for reference only, not part of the graded solution
+Dockerfile
+app.py
+database.py
+docker-compose.yml
+explore_data.py
+*.joblib
+*.db
+students_and_practical_training.csv
+vehicles_and_workshop_jobs.csv
+test_app.py
+train_models.py
+training_risk_ml.py
+pytest.ini
