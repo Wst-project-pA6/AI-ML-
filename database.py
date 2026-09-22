@@ -3,7 +3,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import datetime
 
-DATABASE_URL = "sqlite:///./wst_ai.db"
+DATABASE_URL = "sqlite:////tmp/wst_ai.db" if "VERCEL" in __import__("os").environ else "sqlite:///./wst_ai.db"
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
