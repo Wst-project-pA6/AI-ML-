@@ -73,6 +73,13 @@ df_vehicles = pd.read_csv('vehicles_and_workshop_jobs.csv')
 
 print(f"عدد سجلات المخزون: {len(df_vehicles)}")
 
+# تحديث العمود المستهدف ليطابق المنطق المطلوب:
+# إذا كان المخزون الحالي أقل من أو يساوي الحد الأدنى -> REORDER_RECOMMENDED، غير ذلك -> HEALTHY
+df_vehicles['ai_reorder_status'] = df_vehicles.apply(
+    lambda row: 'REORDER_RECOMMENDED' if row['inventory_on_hand_qty'] <= row['inventory_min_reorder_level'] else 'HEALTHY',
+    axis=1
+)
+
 # Features & Target
 X_veh = df_vehicles[
     [

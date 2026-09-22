@@ -82,14 +82,11 @@ def predict_student_risk(req: StudentRiskRequest, db: Session = Depends(get_db))
 @app.post("/predict/inventory-reorder")
 def predict_inventory_reorder(req: InventoryReorderRequest, db: Session = Depends(get_db)):
     try:
-        X_input = pd.DataFrame([{
-            "inventory_on_hand_qty": req.inventory_on_hand_qty,
-            "inventory_min_reorder_level": req.inventory_min_reorder_level,
-            "part_issued_qty": req.part_issued_qty,
-            "part_unit_cost": req.part_unit_cost
-        }])
-
-        reorder_status = str(inventory_model.predict(X_input)[0])
+        # الشرط المنطقي: إذا كان المتبقي أقل من أو يساوي حد إعادة الطلب
+        if req.inventory_on_hand_qty <= req.inventory_min_reorder_level:
+            reorder_status = "REORDER_RECOMMENDED"
+        else:
+            reorder_status = "HEALTHY"
 
         # حفظ النتيجة في قاعدة البيانات
         log_entry = InventoryReorderLog(
